@@ -36,7 +36,20 @@ pub const REPORT_SHORT: u8 = 0x10;
 pub const REPORT_LONG: u8 = 0x11;
 pub const LONG_LEN: usize = 20;
 /// 自分の要求を識別する software id (1..15、0 はデバイス発の通知)。
-const SW_ID: u8 = 0x0B;
+static SW_ID: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+
+/// Use a distinct HID++ client ID when running the diagnostic alongside Device HUB.
+pub fn use_diagnostic_software_id() -> HubResult<()> {
+    if *SW_ID.get_or_init(|| 0x0C) != 0x0C {
+        return Err(HubError::Invalid("HID++ client already initialized".into()));
+    }
+    Ok(())
+}
+
+fn software_id() -> u8 {
+    *SW_ID.get_or_init(|| 0x0B)
+}
+
 /// 有線直結の device index。
 pub const DEV_WIRED: u8 = 0xFF;
 /// LIGHTSPEED 受信機のペア枠 1。
@@ -139,7 +152,7 @@ pub fn classify(buf: &[u8], dev: u8, feat_idx: u8, func: u8) -> Frame {
     if buf.len() < 7 || buf[1] != dev {
         return Frame::Other;
     }
-    let fs = (func << 4) | SW_ID;
+    let fs = (func << 4) | software_id();
     match buf[0] {
         REPORT_LONG | REPORT_SHORT => {
             if buf[2] == 0xFF && buf[3] == feat_idx && buf[4] == fs {
@@ -202,7 +215,7 @@ impl<L: Link> Hidpp<L> {
         msg[0] = REPORT_LONG;
         msg[1] = self.dev;
         msg[2] = feat_idx;
-        msg[3] = (func << 4) | SW_ID;
+        msg[3] = (func << 4) | software_id();
         let n = params.len().min(16);
         msg[4..4 + n].copy_from_slice(&params[..n]);
         self.link
@@ -1347,14 +1360,20 @@ fn read_profile<L: Link>(
     dir: &[DirEntry],
     i: u8,
 ) -> Result<(Profile, bool), PpError> {
-    // ユーザー領域 (ディレクトリが指すセクタ) → CRC が壊れていれば ROM 既定。
+    // ユーザー領域が読めない場合は工場設定を編集元にしない。
     if let Some(e) = dir.get(i as usize).filter(|e| e.sector < 0x0100) {
-        let raw = ob.read_sector(e.sector)?;
-        if sector_crc_ok(&raw) {
-            return Ok((Profile::new(raw), true));
+        for _ in 0..2 {
+            let raw = ob.read_sector(e.sector)?;
+            if sector_crc_ok(&raw) && (1..=8).contains(&raw[prof::REPORT_RATE]) {
+                return Ok((Profile::new(raw), true));
+            }
         }
+        return Err(PpError::Io("ユーザープロファイルを正しく読み取れません".into()));
     }
     let raw = ob.read_sector(rom_sector(i))?;
+    if !(1..=8).contains(&raw[prof::REPORT_RATE]) {
+        return Err(PpError::Io("ROM プロファイルのレートが範囲外です".into()));
+    }
     Ok((Profile::new(raw), false))
 }
 
@@ -2180,6 +2199,28 @@ mod tests {
         assert!(sector_crc_ok(&d));
         assert_eq!(&d[..9], &[0, 1, 1, 0, 1, 2, 0, 0, 0xFF]);
         assert_eq!(parse_directory(&d, 5).len(), 2);
+    }
+
+    #[test]
+    fn corrupt_user_slot_does_not_fall_back_to_factory_buttons() {
+        let size = 255;
+        let mut mouse = FakeMouse::new(DEV_RECEIVER_SLOT1, size);
+        mouse.sectors.insert(rom_sector(0), sample_profile(size));
+        let mut bad = sample_profile(size);
+        bad[prof::REPORT_RATE] = 255;
+        seal_sector(&mut bad);
+        mouse.sectors.insert(user_sector(0), bad);
+        let mut pp = Hidpp::new(mouse, DEV_RECEIVER_SLOT1);
+        let mut ob = Onboard {
+            pp: &mut pp,
+            idx: ONBOARD_IDX,
+            sector_size: size,
+        };
+        let dir = [DirEntry {
+            sector: user_sector(0),
+            enabled: true,
+        }];
+        assert!(read_profile(&mut ob, &dir, 0).is_err());
     }
 
     /// ROM 既定で動いているマウスに初めて書く: ユーザー領域へ写し、

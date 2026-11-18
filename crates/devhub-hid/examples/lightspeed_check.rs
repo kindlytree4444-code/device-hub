@@ -16,6 +16,7 @@ fn main() -> HubResult<()> {
             _ => return Err(HubError::Invalid(arg)),
         }
     }
+    devhub_hid::logitech::use_diagnostic_software_id()?;
     let hub = devhub_hid::connect()?;
     let mut checked = false;
     let mut keyboard = false;
