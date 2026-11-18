@@ -30,8 +30,19 @@ fn main() -> HubResult<()> {
             let info = driver.info();
             let state = driver.read()?;
             println!(
-                "{:04x} {} {:?}, battery {:?}",
-                info.pid, info.name, state.settings, info.battery
+                "{} {:04x} {} {:?}, battery {:?}, active_profile {}, lighting {:?}",
+                info.id.0,
+                info.pid,
+                info.name,
+                state.settings,
+                info.battery,
+                state.profile.active,
+                driver
+                    .caps()
+                    .lighting
+                    .iter()
+                    .map(|a| (a.id, a.effects.iter().map(|e| e.id).collect::<Vec<_>>()))
+                    .collect::<Vec<_>>()
             );
             if info.kind == DeviceKind::Keyboard && test {
                 let read = || {
@@ -81,7 +92,9 @@ fn main() -> HubResult<()> {
                 .any(|m| m.to_lowercase().contains(&name.to_lowercase()))
         });
     if !keyboard || !mouse || (test && !checked) {
-        return Err(HubError::Protocol(format!("incomplete device check: keyboard={keyboard}, mouse={mouse}, responding_mice={mice:?}, required_mice={wanted:?}, brightness_roundtrip={checked}")));
+        return Err(HubError::Protocol(format!(
+            "incomplete device check: keyboard={keyboard}, mouse={mouse}, responding_mice={mice:?}, required_mice={wanted:?}, brightness_roundtrip={checked}"
+        )));
     }
     Ok(())
 }

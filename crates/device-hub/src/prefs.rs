@@ -38,6 +38,8 @@ pub struct Prefs {
     /// 保存した設定プロファイル (デバイスごとの Change 列)。
     #[serde(default)]
     pub profiles: Vec<SavedProfile>,
+    /// 最初のデバイス検出後に一度だけ適用するプロファイル。
+    pub startup_profile: Option<String>,
     /// プロセス監視ルール (フォアグラウンド連動でプロファイルを適用)。
     #[serde(default)]
     pub proc_rules: Vec<ProcRule>,
@@ -147,6 +149,7 @@ impl Default for Prefs {
             eq_presets: vec![],
             livefx: Default::default(),
             profiles: vec![],
+            startup_profile: None,
             proc_rules: vec![],
         }
     }

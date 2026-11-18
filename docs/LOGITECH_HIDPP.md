@@ -239,3 +239,15 @@ layers use the G HUB slot order. The mouse has no lighting controls.
 Use `--mouse "G502 X"` and/or `--mouse "G703"` with the hardware check to
 require each named mouse to return settings. A disconnected receiver alone
 cannot satisfy the check.
+
+The G913/G915 TKL can add or remove the individual game-mode usages 0x35
+and 0x39 through HID++ 0x4522. The device acknowledges the change and has
+no command to read back the list. A profile can set either toggle without
+changing the other blocked keys.
+
+For a migrated installation, the optional `startup_profile` preference names
+a saved profile to apply once after the first device scan. For G502 X, put
+the onboard-mode setting before the slot selection to handle reconnects in
+host mode. A foreground rule can then switch among prewritten onboard slots
+without rewriting button tables. Four format-3 slots and both button banks
+were checked on G502 X LIGHTSPEED, including switch and readback from Windows.

@@ -1,4 +1,4 @@
-use super::{parse_battery_voltage, read_fw, read_name, Hidpp, DEV_RECEIVER_SLOT1};
+use super::{DEV_RECEIVER_SLOT1, Hidpp, parse_battery_voltage, read_fw, read_name};
 use devhub_core::{backend::*, model::*};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -6,6 +6,19 @@ use std::sync::Mutex;
 const BRIGHTNESS: u16 = 0x8040;
 const RATE: u16 = 0x8060;
 const RGB: u16 = 0x8071;
+const DISABLE_BY_USAGE: u16 = 0x4522;
+const GAME_KEYS: [(&str, u8, &str); 2] = [
+    (
+        "game_mode_usage_35",
+        0x35,
+        "ゲームモード中に半角/全角 (US: `~) を無効化",
+    ),
+    (
+        "game_mode_usage_39",
+        0x39,
+        "ゲームモード中に Caps Lock を無効化",
+    ),
+];
 const LEVELS: [i64; 6] = [0, 6, 12, 25, 50, 100];
 
 pub struct Keyboard {
@@ -13,6 +26,7 @@ pub struct Keyboard {
     info: DeviceInfo,
     caps: Capabilities,
     last_light: Mutex<BTreeMap<u8, LightingState>>,
+    requested_game_keys: Mutex<BTreeMap<String, SettingValue>>,
 }
 
 pub fn open(dev: hidapi::HidDevice, mut info: DeviceInfo) -> HubResult<Keyboard> {
@@ -28,6 +42,12 @@ pub fn open(dev: hidapi::HidDevice, mut info: DeviceInfo) -> HubResult<Keyboard>
     info.name = name;
     info.firmware = read_fw(&mut pp);
     let mut caps = Capabilities::empty();
+    if pp.call(DISABLE_BY_USAGE, 0, &[]).is_ok_and(|p| p[0] >= 2) {
+        for (id, _, label) in GAME_KEYS {
+            caps.settings
+                .push(SettingSpec::toggle(id, section::KEYBOARD, label));
+        }
+    }
     let range = pp.call(BRIGHTNESS, 0, &[]).map_err(|e| e.to_hub("輝度"))?;
     if range[..6] == [0, 100, 5, 3, 0, 0] {
         caps.settings.push(SettingSpec::choice(
@@ -107,6 +127,7 @@ pub fn open(dev: hidapi::HidDevice, mut info: DeviceInfo) -> HubResult<Keyboard>
         info,
         caps,
         last_light: Mutex::new(BTreeMap::new()),
+        requested_game_keys: Mutex::new(BTreeMap::new()),
     })
 }
 
@@ -130,7 +151,12 @@ impl DeviceDriver for Keyboard {
         self.caps.clone()
     }
     fn read(&self) -> HubResult<DeviceState> {
-        let mut settings = BTreeMap::new();
+        // 0x4522 has no getter for the active usage list.
+        let mut settings = self
+            .requested_game_keys
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         if self.caps.setting("brightness").is_some() {
             let p = self.call(BRIGHTNESS, 1, &[])?;
             settings.insert(
@@ -173,6 +199,20 @@ impl DeviceDriver for Keyboard {
                     "polling" => self.call(RATE, 2, &[(1000 / v) as u8])?,
                     _ => return Err(HubError::Unsupported("設定")),
                 };
+            }
+            Change::Setting {
+                id,
+                value: SettingValue::Bool(block),
+            } if self.caps.setting(id).is_some() => {
+                let (_, usage, _) = GAME_KEYS
+                    .iter()
+                    .find(|(key, _, _)| key == id)
+                    .ok_or(HubError::Unsupported("ゲームモード設定"))?;
+                self.call(DISABLE_BY_USAGE, if *block { 1 } else { 2 }, &[*usage])?;
+                self.requested_game_keys
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(id.clone(), SettingValue::Bool(*block));
             }
             Change::Lighting { area, state }
                 if self.caps.lighting.iter().any(|a| a.id == *area) =>

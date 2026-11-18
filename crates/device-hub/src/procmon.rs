@@ -404,6 +404,20 @@ impl Shell {
     /// - 遷移は復帰→新規の順で、管理下のアプリ間を直接移っても新しい側が勝つ。
     pub fn proc_tick(&mut self, cx: &mut Context<Self>) {
         self.proc_drain(cx);
+        if self.hub.scanned {
+            if let Some(name) = self.pending_startup_profile.take() {
+                if let Some(device) = self
+                    .prefs
+                    .profiles
+                    .iter()
+                    .find(|p| p.name == name)
+                    .and_then(|p| p.devices.first())
+                    .map(|t| t.device.clone())
+                {
+                    self.apply_profile_named(&device, &name);
+                }
+            }
+        }
         if self.prefs.proc_rules.is_empty() {
             // ルールが全削除 = 管理下から外れた。適用中だった分は記録値で復帰する。
             let states = std::mem::take(&mut self.proc_states);
