@@ -217,7 +217,7 @@ G HUB を消してもマウスの設定はオンボードメモリに残るの�
 The G913/G915 TKL receiver (046D:C545, HID++ long collection FF00:0002)
 exposes keyboard brightness, report rate, battery voltage and two RGB clusters.
 This driver reads the paired keyboard name before offering those controls.
-Fixed-colour and off requests use the host lighting mode. The colour shown
+Fixed-colour, five-second colour-cycle and off requests use the host lighting mode. The colour shown
 after a request is the last colour sent in the current session.
 Brightness, report rate and battery are read directly from the keyboard.
 

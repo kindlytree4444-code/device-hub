@@ -63,6 +63,19 @@ pub fn open(dev: hidapi::HidDevice, mut info: DeviceInfo) -> HubResult<Keyboard>
                 .call(RGB, 0, &[id, 0, 0])
                 .map_err(|e| e.to_hub("照明領域"))?;
             if fixed[..4] == [id, 1, 0, 1] && off[..4] == [id, 0, 0, 0] {
+                let mut effects = vec![LightEffect::new(1, "固定色").color().still()];
+                let zone = pp
+                    .call(RGB, 0, &[id, 255, 0])
+                    .map_err(|e| e.to_hub("照明領域"))?;
+                for index in 2..zone[4].min(16) {
+                    let e = pp
+                        .call(RGB, 0, &[id, index, 0])
+                        .map_err(|e| e.to_hub("照明効果"))?;
+                    if e[..4] == [id, index, 0, 3] {
+                        effects.push(LightEffect::new(index, "カラーサイクル (5秒)").still());
+                        break;
+                    }
+                }
                 caps.lighting.push(LightArea {
                     id,
                     name: if id == 0 {
@@ -71,7 +84,7 @@ pub fn open(dev: hidapi::HidDevice, mut info: DeviceInfo) -> HubResult<Keyboard>
                         "キー・指定色"
                     }
                     .into(),
-                    effects: vec![LightEffect::new(1, "固定色").color().still()],
+                    effects,
                     brightness_max: 0,
                     speed_max: 0,
                     directions: vec![],
@@ -164,6 +177,15 @@ impl DeviceDriver for Keyboard {
             Change::Lighting { area, state }
                 if self.caps.lighting.iter().any(|a| a.id == *area) =>
             {
+                if state.on
+                    && !self
+                        .caps
+                        .lighting
+                        .iter()
+                        .any(|z| z.id == *area && z.effects.iter().any(|e| e.id == state.effect))
+                {
+                    return Err(HubError::Invalid("このゾーンの照明効果".into()));
+                }
                 let mode = self.call(super::feat::ONBOARD_PROFILES, 2, &[])?[0];
                 let control = self.call(RGB, 5, &[0])?;
                 let power = self.call(RGB, 8, &[0])?[1];
@@ -184,18 +206,8 @@ impl DeviceDriver for Keyboard {
                         restore.push((RGB, 8, vec![1, power]));
                         self.call(RGB, 8, &[1, 1])?;
                     }
-                    let mut p = [0u8; 13];
-                    p[0] = *area;
-                    if state.on {
-                        p[1..6].copy_from_slice(&[
-                            1,
-                            state.color.r,
-                            state.color.g,
-                            state.color.b,
-                            2,
-                        ]);
-                    }
-                    p[12] = 1;
+                    let effect = if state.on { state.effect } else { 0 };
+                    let p = cluster_packet(*area, effect, state.color);
                     self.call(RGB, 1, &p)?;
                     Ok(())
                 })();
@@ -229,5 +241,43 @@ impl DeviceDriver for Keyboard {
             0,
             &[],
         )?))
+    }
+}
+
+fn cluster_packet(area: u8, effect: u8, color: Rgb) -> [u8; 13] {
+    let mut p = [0; 13];
+    p[0] = area;
+    p[1] = effect;
+    match effect {
+        0 => {}
+        1 => p[2..6].copy_from_slice(&[color.r, color.g, color.b, 2]),
+        _ => {
+            // The only other advertised effect is the zone's validated colour-cycle index.
+            p[7..9].copy_from_slice(&5000u16.to_be_bytes());
+            p[9] = 100;
+        }
+    }
+    p[12] = 1;
+    p
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn cluster_commands_use_zone_local_indices_and_big_endian_period() {
+        let rgb = Rgb::new(10, 20, 30);
+        assert_eq!(
+            cluster_packet(0, 1, rgb),
+            [0, 1, 10, 20, 30, 2, 0, 0, 0, 0, 0, 0, 1]
+        );
+        assert_eq!(
+            cluster_packet(1, 4, rgb),
+            [1, 4, 0, 0, 0, 0, 0, 0x13, 0x88, 100, 0, 0, 1]
+        );
+        assert_eq!(
+            cluster_packet(0, 0, rgb),
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+        );
     }
 }
