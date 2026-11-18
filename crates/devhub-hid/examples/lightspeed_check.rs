@@ -2,13 +2,24 @@
 use devhub_core::{Change, DeviceKind, DriverKind, HubError, HubResult, SettingValue};
 
 fn main() -> HubResult<()> {
-    let test = std::env::args()
-        .skip(1)
-        .any(|a| a == "--brightness-roundtrip");
+    let mut test = false;
+    let mut wanted = Vec::new();
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--brightness-roundtrip" => test = true,
+            "--mouse" => wanted.push(
+                args.next()
+                    .filter(|s| !s.is_empty() && !s.starts_with("--"))
+                    .ok_or_else(|| HubError::Invalid("--mouse needs a model name".into()))?,
+            ),
+            _ => return Err(HubError::Invalid(arg)),
+        }
+    }
     let hub = devhub_hid::connect()?;
     let mut checked = false;
     let mut keyboard = false;
-    let mut mouse = false;
+    let mut mice = Vec::new();
     for device in hub
         .scan()?
         .into_iter()
@@ -55,7 +66,7 @@ fn main() -> HubResult<()> {
             }
             match info.kind {
                 DeviceKind::Keyboard => keyboard = true,
-                DeviceKind::Mouse if state.mouse.is_some() => mouse = true,
+                DeviceKind::Mouse if state.mouse.is_some() => mice.push(info.name),
                 _ => {}
             }
             Ok(())
@@ -64,8 +75,13 @@ fn main() -> HubResult<()> {
             eprintln!("{:04x}: {error}", device.pid);
         }
     }
+    let mouse = !mice.is_empty()
+        && wanted.iter().all(|name| {
+            mice.iter()
+                .any(|m| m.to_lowercase().contains(&name.to_lowercase()))
+        });
     if !keyboard || !mouse || (test && !checked) {
-        return Err(HubError::Protocol(format!("incomplete device check: keyboard={keyboard}, mouse={mouse}, brightness_roundtrip={checked}")));
+        return Err(HubError::Protocol(format!("incomplete device check: keyboard={keyboard}, mouse={mouse}, responding_mice={mice:?}, required_mice={wanted:?}, brightness_roundtrip={checked}")));
     }
     Ok(())
 }

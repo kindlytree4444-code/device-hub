@@ -230,3 +230,12 @@ For a hardware check, run
 `cargo run --locked -p devhub-hid --example lightspeed_check -- --brightness-roundtrip`.
 It changes the keyboard brightness, checks the reply, restores the previous
 value and checks again. Mouse settings are only read by this command.
+
+For G502 X LIGHTSPEED identified by device name and onboard format 3 with
+11 buttons, the button page also exposes the 11 G-Shift bindings. The wheel
+scroll and reserved fields in each 16-entry table are left intact. Both
+layers use the G HUB slot order. The mouse has no lighting controls.
+
+Use `--mouse "G502 X"` and/or `--mouse "G703"` with the hardware check to
+require each named mouse to return settings. A disconnected receiver alone
+cannot satisfy the check.

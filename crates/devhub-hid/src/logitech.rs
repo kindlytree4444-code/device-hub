@@ -548,10 +548,19 @@ impl Profile {
             raw,
             bits_le: false,
         };
-        // 左ボタン (slot 0) は必ずマウス左 — 0x0001 の並びでエンディアンを決める。
-        let b = p.button_raw(0);
-        if b[0] == bind::HID && b[1] == bind::HID_MOUSE && b[2] == 0x01 && b[3] == 0x00 {
-            p.bits_le = true;
+        // Left click can be moved to any base button. Use all five standard mouse masks.
+        if let Some(le) = p
+            .raw
+            .get(prof::BUTTONS..prof::BUTTONS + 4 * prof::MAX_BUTTONS)
+            .and_then(|raw| {
+                raw.chunks_exact(4).find_map(|b| match b {
+                    [bind::HID, bind::HID_MOUSE, 1 | 2 | 4 | 8 | 16, 0] => Some(true),
+                    [bind::HID, bind::HID_MOUSE, 0, 1 | 2 | 4 | 8 | 16] => Some(false),
+                    _ => None,
+                })
+            })
+        {
+            p.bits_le = le;
         }
         p
     }
@@ -631,6 +640,9 @@ impl Profile {
     }
 
     pub fn set_button(&mut self, i: usize, a: &ButtonAction) -> HubResult<()> {
+        if i >= 2 * prof::MAX_BUTTONS {
+            return Err(HubError::Invalid("ボタン番号".into()));
+        }
         let b = match a {
             ButtonAction::Dpi(DpiFn::Shift(d)) => {
                 // シフト先 DPI のステージを指す。無ければエラー (ステージに追加してもらう)。
@@ -956,6 +968,8 @@ impl<L: Link> Onboard<'_, L> {
 /// 機能の検出結果 (開いた時点)。
 #[derive(Clone, Debug, Default)]
 struct Feats {
+    g502x: bool,
+    lighting: bool,
     onboard: Option<OnboardDesc>,
     dpi: Option<(u32, u32, u32)>,
     battery: Option<u16>,
@@ -1185,6 +1199,18 @@ impl LogiDriver {
 
         // 名前 (0x0005) と FW (0x0003)。
         let name = read_name(&mut pp);
+        f.g502x = name
+            .as_deref()
+            .is_some_and(|n| n.starts_with("G502 X") && !n.contains("PLUS"))
+            && f.onboard.is_some_and(|d| {
+                d.memory_model == 1 && d.profile_format == 3 && d.button_count == 11
+            });
+        f.lighting = !f.g502x
+            && name
+                .as_deref()
+                .is_some_and(|n| !n.starts_with("G502 X") || n.contains("PLUS"))
+            && (pp.feature(feat::RGB_EFFECTS).ok().flatten().is_some()
+                || pp.feature(0x8070).ok().flatten().is_some());
         let fw = read_fw(&mut pp);
         drop(pp);
 
@@ -1192,6 +1218,9 @@ impl LogiDriver {
         *self.caps.lock().unwrap_or_else(|p| p.into_inner()) = caps;
         *self.feats.lock().unwrap_or_else(|p| p.into_inner()) = f.clone();
         let mut i = self.info.lock().unwrap_or_else(|p| p.into_inner());
+        if f.g502x {
+            i.model = "g502-x-lightspeed".into();
+        }
         if let Some(n) = name.filter(|n| !n.is_empty()) {
             i.name = n;
         }
@@ -1437,6 +1466,30 @@ fn read_fw<L: Link>(pp: &mut Hidpp<L>) -> Option<String> {
     None
 }
 
+const G502X_BUTTONS: [&str; 11] = [
+    "左クリック",
+    "右クリック",
+    "中央クリック",
+    "戻る (G4)",
+    "DPI シフト (G6)",
+    "進む (G5)",
+    "左チルト (G10)",
+    "右チルト (G11)",
+    "プロファイル (G9)",
+    "DPI 上 (G8)",
+    "DPI 下 (G7)",
+];
+
+fn physical_slot(slot: usize, base: usize, shifted: bool) -> HubResult<usize> {
+    if slot < base {
+        return Ok(slot);
+    }
+    if shifted && slot - base < base {
+        return Ok(prof::MAX_BUTTONS + slot - base);
+    }
+    Err(HubError::Invalid("ボタン番号".into()))
+}
+
 fn build_caps(f: &Feats) -> Capabilities {
     let mut c = Capabilities::empty();
     let Some(desc) = f.onboard.filter(|d| d.layout_known()) else {
@@ -1457,7 +1510,17 @@ fn build_caps(f: &Feats) -> Capabilities {
         xy_split: false,
         stage_colors: false,
         stage_toggle: false,
-        buttons: button_names(nbtn),
+        buttons: if f.g502x {
+            G502X_BUTTONS
+                .iter()
+                .map(|n| ButtonSlot { name: (*n).into() })
+                .chain(G502X_BUTTONS.iter().map(|n| ButtonSlot {
+                    name: format!("G-Shift · {n}"),
+                }))
+                .collect()
+        } else {
+            button_names(nbtn)
+        },
         button_kinds: vec![
             ButtonActionKind::Mouse,
             ButtonActionKind::Dpi,
@@ -1489,23 +1552,25 @@ fn build_caps(f: &Feats) -> Capabilities {
             renamable: true,
         });
     }
-    c.lighting.push(LightArea {
-        id: 0,
-        name: "LED".into(),
-        effects: vec![
-            LightEffect::new(led::FIXED, "固定").color().still(),
-            LightEffect::new(led::BREATHING, "呼吸").color(),
-            LightEffect::new(led::CYCLE, "カラーサイクル"),
-        ],
-        brightness_max: 100,
-        speed_max: 10,
-        directions: vec![],
-        switchable: true,
-        zones: vec![],
-        per_key: false,
-        direct_drive: false,
-        live_readback: false,
-    });
+    if f.lighting {
+        c.lighting.push(LightArea {
+            id: 0,
+            name: "LED".into(),
+            effects: vec![
+                LightEffect::new(led::FIXED, "固定").color().still(),
+                LightEffect::new(led::BREATHING, "呼吸").color(),
+                LightEffect::new(led::CYCLE, "カラーサイクル"),
+            ],
+            brightness_max: 100,
+            speed_max: 10,
+            directions: vec![],
+            switchable: true,
+            zones: vec![],
+            per_key: false,
+            direct_drive: false,
+            live_readback: false,
+        });
+    }
     c.actions.push(
         ActionSpec::new(
             "restore_profile",
@@ -1561,12 +1626,9 @@ impl DeviceDriver for LogiDriver {
             "polling".into(),
             SettingValue::Choice(p.report_rate_hz() as i64),
         );
-        let nbtn = self
-            .caps()
-            .mouse
-            .as_ref()
-            .map(|m| m.buttons.len())
-            .unwrap_or(0);
+        let base = (self.onboard()?.button_count as usize).clamp(1, prof::MAX_BUTTONS);
+        let shifted = self.feats.lock().unwrap_or_else(|p| p.into_inner()).g502x;
+        let nbtn = if shifted { base * 2 } else { base };
         let stages: Vec<DpiStage> = p
             .stages()
             .into_iter()
@@ -1578,7 +1640,9 @@ impl DeviceDriver for LogiDriver {
             })
             .collect();
         let mut lighting = BTreeMap::new();
-        lighting.insert(0u8, decode_led(&p.led(0)));
+        if !self.caps().lighting.is_empty() {
+            lighting.insert(0u8, decode_led(&p.led(0)));
+        }
         Ok(DeviceState {
             profile: ProfileState {
                 active: l.active,
@@ -1588,7 +1652,9 @@ impl DeviceDriver for LogiDriver {
             mouse: Some(MouseState {
                 active_stage: live_stage.unwrap_or_else(|| p.active_stage()),
                 stages,
-                buttons: (0..nbtn).map(|i| p.button(i)).collect(),
+                buttons: (0..nbtn)
+                    .map(|i| physical_slot(i, base, shifted).map(|slot| p.button(slot)))
+                    .collect::<HubResult<_>>()?,
                 macros: vec![],
                 adaptive: None,
             }),
@@ -1647,19 +1713,25 @@ impl DeviceDriver for LogiDriver {
                 Ok(())
             }),
             Change::Button { slot, action } => {
-                if *slot == 0 && !matches!(action, ButtonAction::Mouse(MouseFn::Left)) {
-                    // 左クリックを失うと元に戻す操作もしづらい。UI と同じ検査をここでも。
-                    let l = self.load()?;
-                    let n = self.caps().mouse.map(|m| m.buttons.len()).unwrap_or(0);
-                    let other_left =
-                        (1..n).any(|i| l.current.button(i) == ButtonAction::Mouse(MouseFn::Left));
-                    if !other_left {
-                        return Err(HubError::Invalid("左クリックが 1 つも無くなります".into()));
+                let base = (self.onboard()?.button_count as usize).clamp(1, prof::MAX_BUTTONS);
+                let shifted = self.feats.lock().unwrap_or_else(|p| p.into_inner()).g502x;
+                let index = physical_slot(*slot, base, shifted)?;
+                self.edit(|p| {
+                    if index < base
+                        && p.button(index) == ButtonAction::Mouse(MouseFn::Left)
+                        && *action != ButtonAction::Mouse(MouseFn::Left)
+                        && !(0..base).any(|i| {
+                            i != index && p.button(i) == ButtonAction::Mouse(MouseFn::Left)
+                        })
+                    {
+                        return Err(HubError::Invalid(
+                            "通常レイヤーに左クリックが必要です".into(),
+                        ));
                     }
-                }
-                self.edit(|p| p.set_button(*slot, action))
+                    p.set_button(index, action)
+                })
             }
-            Change::Lighting { area: 0, state } => {
+            Change::Lighting { area: 0, state } if !self.caps().lighting.is_empty() => {
                 // G HUB は 2 ゾーンに同じ値を書く (G703 実機) — 両方へ書く。
                 let l = encode_led(state);
                 self.edit(|p| {
@@ -1923,6 +1995,30 @@ mod tests {
     fn crc_ccitt_known_vector() {
         // CRC-16/CCITT-FALSE("123456789") = 0x29B1
         assert_eq!(crc_ccitt(b"123456789"), 0x29B1);
+    }
+
+    #[test]
+    fn little_endian_mouse_with_left_click_moved() {
+        let mut raw = vec![0xff; 255];
+        raw[prof::BUTTONS + 4..prof::BUTTONS + 8].copy_from_slice(&[
+            bind::HID,
+            bind::HID_MOUSE,
+            1,
+            0,
+        ]);
+        let p = Profile::new(raw);
+        assert!(p.bits_le);
+        assert_eq!(p.button(1), ButtonAction::Mouse(MouseFn::Left));
+    }
+
+    #[test]
+    fn g502x_banks_leave_wheel_and_reserved_slots_alone() {
+        let slots: Vec<_> = (0..22)
+            .map(|i| physical_slot(i, 11, true).unwrap())
+            .collect();
+        assert_eq!(slots, (0..11).chain(16..27).collect::<Vec<_>>());
+        assert!(physical_slot(22, 11, true).is_err());
+        assert!(physical_slot(11, 11, false).is_err());
     }
 
     #[test]
