@@ -236,6 +236,9 @@ impl HubBackend for RealHub {
             DriverKind::Walkplay => Arc::new(walkplay::open(dev, info)?),
             DriverKind::Atk => Arc::new(atk::open(dev, info, events)?),
             DriverKind::Lamzu => Arc::new(lamzu::open(dev, info, events)?),
+            DriverKind::Logitech if info.kind == DeviceKind::Keyboard => {
+                Arc::new(logitech::g913::open(dev, info)?)
+            }
             DriverKind::Logitech => {
                 Arc::new(logitech::open(dev, info, events, self.detected.clone())?)
             }

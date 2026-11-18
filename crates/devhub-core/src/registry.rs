@@ -305,11 +305,15 @@ pub const KNOWN: &[KnownDevice] = &[
         "LIGHTSPEED マウス",
         Transport::Wireless24G,
     ),
+    KnownDevice {
+        kind: DeviceKind::Keyboard,
+        ..lg(0xC545, "g913-tkl-lightspeed", "G913 / G915 TKL", Transport::Wireless24G)
+    },
     // PRO X SUPERLIGHT 受信機 — 同じ HID++ 2.0 / 0x8100 構成 (実機未確認)。
     lg(
         0xC547,
         "lightspeed-c547",
-        "PRO X SUPERLIGHT",
+        "LIGHTSPEED マウス",
         Transport::Wireless24G,
     ),
 ];

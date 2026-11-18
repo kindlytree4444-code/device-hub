@@ -30,6 +30,8 @@ use std::time::{Duration, Instant};
 
 // ====================================================================== 定数
 
+pub mod g913;
+
 pub const REPORT_SHORT: u8 = 0x10;
 pub const REPORT_LONG: u8 = 0x11;
 pub const LONG_LEN: usize = 20;
@@ -1126,16 +1128,12 @@ impl LogiDriver {
             return;
         }
         let mut f = Feats::default();
+        if pp.call(feat::DEVICE_NAME, 2, &[]).map(|r| r[0]) != Ok(3) {
+            return;
+        }
         if let Ok(Some(idx)) = pp.feature(feat::ONBOARD_PROFILES) {
             if let Ok(p) = pp.request(idx, 0, &[]) {
                 let desc = OnboardDesc::parse(&p);
-                // G HUB が「オンボードメモリ OFF」(ホストモード) にしたままだと
-                // プロファイルが効かない — オンボードモードへ戻す。
-                if let Ok(m) = pp.request(idx, 2, &[]) {
-                    if m[0] != 1 {
-                        pp.request(idx, 1, &[1]).ok();
-                    }
-                }
                 f.onboard = Some(desc);
             }
         }
@@ -1185,7 +1183,6 @@ impl LogiDriver {
         }
         f.report_rates.sort_unstable();
 
-        release_led_control(&mut pp);
         // 名前 (0x0005) と FW (0x0003)。
         let name = read_name(&mut pp);
         let fw = read_fw(&mut pp);
@@ -1234,6 +1231,20 @@ impl LogiDriver {
             return Err(HubError::Unsupported("このプロファイル形式"));
         }
         Ok(d)
+    }
+
+    fn require_onboard_mode(&self) -> HubResult<()> {
+        self.onboard()?;
+        let mode = self
+            .pp()
+            .call(feat::ONBOARD_PROFILES, 2, &[])
+            .map_err(|e| e.to_hub("オンボードモード"))?;
+        if mode[0] != 1 {
+            return Err(HubError::Invalid(
+                "一般設定でオンボードモードを有効にしてください".into(),
+            ));
+        }
+        Ok(())
     }
 
     fn with_onboard<T>(
@@ -1433,6 +1444,10 @@ fn build_caps(f: &Feats) -> Capabilities {
     };
     let (dmin, dmax, dstep) = f.dpi.unwrap_or((100, 25600, 50));
     let nbtn = (desc.button_count as usize).clamp(1, prof::MAX_BUTTONS);
+    c.settings.push(
+        SettingSpec::toggle("onboard_mode", section::SYSTEM, "オンボードモード")
+            .help("本体に保存した割り当てを使います。オフにするとホスト側の制御に戻ります。"),
+    );
     c.mouse = Some(MouseCaps {
         dpi_min: dmin,
         dpi_max: dmax,
@@ -1539,6 +1554,9 @@ impl DeviceDriver for LogiDriver {
             .ok()
             .and_then(|r| p.stages().iter().position(|&(i, _)| i == r[0] as usize));
         let mut settings = BTreeMap::new();
+        if let Ok(p) = self.pp().call(feat::ONBOARD_PROFILES, 2, &[]) {
+            settings.insert("onboard_mode".into(), SettingValue::Bool(p[0] == 1));
+        }
         settings.insert(
             "polling".into(),
             SettingValue::Choice(p.report_rate_hz() as i64),
@@ -1581,6 +1599,20 @@ impl DeviceDriver for LogiDriver {
     }
 
     fn apply(&self, change: &Change) -> HubResult<()> {
+        if let Change::Setting {
+            id,
+            value: SettingValue::Bool(on),
+        } = change
+        {
+            if id == "onboard_mode" {
+                self.onboard()?;
+                self.pp()
+                    .call(feat::ONBOARD_PROFILES, 1, &[if *on { 1 } else { 2 }])
+                    .map_err(|e| e.to_hub("オンボードモード"))?;
+                return Ok(());
+            }
+        }
+        self.require_onboard_mode()?;
         let (dmin, dmax) = self
             .caps()
             .mouse
@@ -1666,6 +1698,7 @@ impl DeviceDriver for LogiDriver {
     fn run_action(&self, id: &str, _file: Option<&std::path::Path>) -> HubResult<ActionOutcome> {
         match id {
             "restore_profile" => {
+                self.require_onboard_mode()?;
                 let l = self.load()?;
                 self.with_onboard("出荷時に戻す", |ob, desc| {
                     let raw = ob.read_sector(rom_sector(l.active))?;

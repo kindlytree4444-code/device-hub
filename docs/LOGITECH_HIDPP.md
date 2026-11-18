@@ -212,3 +212,21 @@ G HUB の挙動を観察したいときは、G HUB を起動したまま `logipr
   `-RemoveDrivers` で G HUB 仮想デバイスドライバ (`logi_joy_*.inf`) も削除。`-WhatIf` で予行演習。
 
 G HUB を消してもマウスの設定はオンボードメモリに残るので、消した直後から元の設定のまま動く。
+## Logicool LIGHTSPEED
+
+The G913/G915 TKL receiver (046D:C545, HID++ long collection FF00:0002)
+exposes keyboard brightness, report rate, battery voltage and two RGB clusters.
+This driver reads the paired keyboard name before offering those controls.
+Fixed-colour and off requests use the host lighting mode. The colour shown
+after a request is the last colour sent in the current session.
+Brightness, report rate and battery are read directly from the keyboard.
+
+The mouse backend reads the onboard profile. Opening a receiver leaves its
+mode unchanged. Select the onboard-mode switch in General before editing
+mouse settings. G HUB application profiles and G-Shift tables are separate
+from the active onboard profile.
+
+For a hardware check, run
+`cargo run --locked -p devhub-hid --example lightspeed_check -- --brightness-roundtrip`.
+It changes the keyboard brightness, checks the reply, restores the previous
+value and checks again. Mouse settings are only read by this command.
