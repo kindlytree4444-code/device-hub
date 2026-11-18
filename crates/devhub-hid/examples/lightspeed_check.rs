@@ -7,6 +7,8 @@ fn main() -> HubResult<()> {
         .any(|a| a == "--brightness-roundtrip");
     let hub = devhub_hid::connect()?;
     let mut checked = false;
+    let mut keyboard = false;
+    let mut mouse = false;
     for device in hub
         .scan()?
         .into_iter()
@@ -51,14 +53,19 @@ fn main() -> HubResult<()> {
                 checked = true;
                 println!("Keyboard brightness changed, read back and restored.");
             }
+            match info.kind {
+                DeviceKind::Keyboard => keyboard = true,
+                DeviceKind::Mouse if state.mouse.is_some() => mouse = true,
+                _ => {}
+            }
             Ok(())
         })();
         if let Err(error) = result {
             eprintln!("{:04x}: {error}", device.pid);
         }
     }
-    if test && !checked {
-        return Err(HubError::Disconnected);
+    if !keyboard || !mouse || (test && !checked) {
+        return Err(HubError::Protocol(format!("incomplete device check: keyboard={keyboard}, mouse={mouse}, brightness_roundtrip={checked}")));
     }
     Ok(())
 }

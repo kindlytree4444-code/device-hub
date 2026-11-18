@@ -291,6 +291,12 @@ pub const KNOWN: &[KnownDevice] = &[
     // 同じ IF の FF00:0001 (short 0x10) は受信機の接続通知用にドライバが別に開く。
     // PRO Wireless 有線 (USB ケーブル接続時、device index 0xFF)。
     lg(0xC088, "pro-wireless", "PRO Wireless", Transport::Wired),
+    lg(
+        0xC098,
+        "g502-x-lightspeed",
+        "G502 X LIGHTSPEED",
+        Transport::Wired,
+    ),
     // G703 LIGHTSPEED (HERO) 有線 — 実機確認 (logiprobe: HID++ 4.2, 0x8100 format 4,
     // sector 255B, ボタン 6, DPI 100-25600/50)。無線は同じ c539 受信機。
     KnownDevice {
@@ -307,7 +313,12 @@ pub const KNOWN: &[KnownDevice] = &[
     ),
     KnownDevice {
         kind: DeviceKind::Keyboard,
-        ..lg(0xC545, "g913-tkl-lightspeed", "G913 / G915 TKL", Transport::Wireless24G)
+        ..lg(
+            0xC545,
+            "g913-tkl-lightspeed",
+            "G913 / G915 TKL",
+            Transport::Wireless24G,
+        )
     },
     // PRO X SUPERLIGHT 受信機 — 同じ HID++ 2.0 / 0x8100 構成 (実機未確認)。
     lg(

@@ -17,7 +17,11 @@ pub struct Keyboard {
 
 pub fn open(dev: hidapi::HidDevice, mut info: DeviceInfo) -> HubResult<Keyboard> {
     let mut pp = Hidpp::new(dev, DEV_RECEIVER_SLOT1);
-    let name = read_name(&mut pp).ok_or(HubError::Disconnected)?;
+    // The receiver can take a second to answer the first request after idle.
+    pp.timeout_ms = 1200;
+    let name = read_name(&mut pp)
+        .or_else(|| read_name(&mut pp))
+        .ok_or(HubError::Disconnected)?;
     if !name.starts_with("G913 TKL ") && !name.starts_with("G915 TKL ") {
         return Err(HubError::Unsupported("受信機の接続先"));
     }
@@ -160,22 +164,56 @@ impl DeviceDriver for Keyboard {
             Change::Lighting { area, state }
                 if self.caps.lighting.iter().any(|a| a.id == *area) =>
             {
-                let mode = self.call(super::feat::ONBOARD_PROFILES, 2, &[])?;
-                if mode[0] != 2 {
-                    self.call(super::feat::ONBOARD_PROFILES, 1, &[2])?;
+                let mode = self.call(super::feat::ONBOARD_PROFILES, 2, &[])?[0];
+                let control = self.call(RGB, 5, &[0])?;
+                let power = self.call(RGB, 8, &[0])?[1];
+                let change_mode = mode != 2;
+                let change_control = control[1..3] != [3, 7];
+                let change_power = power != 1;
+                let mut restore = Vec::new();
+                let result = (|| -> HubResult<()> {
+                    if change_mode {
+                        restore.push((super::feat::ONBOARD_PROFILES, 1, vec![mode]));
+                        self.call(super::feat::ONBOARD_PROFILES, 1, &[2])?;
+                    }
+                    if change_control {
+                        restore.push((RGB, 5, vec![1, control[1], control[2]]));
+                        self.call(RGB, 5, &[1, 3, 7])?;
+                    }
+                    if change_power {
+                        restore.push((RGB, 8, vec![1, power]));
+                        self.call(RGB, 8, &[1, 1])?;
+                    }
+                    let mut p = [0u8; 13];
+                    p[0] = *area;
+                    if state.on {
+                        p[1..6].copy_from_slice(&[
+                            1,
+                            state.color.r,
+                            state.color.g,
+                            state.color.b,
+                            2,
+                        ]);
+                    }
+                    p[12] = 1;
+                    self.call(RGB, 1, &p)?;
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    let mut failures = Vec::new();
+                    for (feature, function, args) in restore.into_iter().rev() {
+                        if let Err(e) = self.call(feature, function, &args) {
+                            failures.push(e.to_string());
+                        }
+                    }
+                    if failures.is_empty() {
+                        return Err(error);
+                    }
+                    return Err(HubError::Protocol(format!(
+                        "{error} / 復元エラー: {}",
+                        failures.join(", ")
+                    )));
                 }
-                self.call(RGB, 5, &[1, 3, 7])?;
-                let power = self.call(RGB, 8, &[0])?;
-                if power[1] != 1 {
-                    self.call(RGB, 8, &[1, 1])?;
-                }
-                let mut p = [0u8; 13];
-                p[0] = *area;
-                if state.on {
-                    p[1..6].copy_from_slice(&[1, state.color.r, state.color.g, state.color.b, 2]);
-                }
-                p[12] = 1;
-                self.call(RGB, 1, &p)?;
                 self.last_light
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
