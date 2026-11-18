@@ -260,6 +260,47 @@ impl Shell {
                 )),
         );
 
+        let autostart_on = crate::autostart::is_enabled();
+        let resident = ui::card_titled("常駐 (G HUB の代わり)", "power", None).child(
+            ui::body()
+                .pb(px(12.))
+                .child(ui::row_first(
+                    "Windows 起動時に自動起動",
+                    Some("ログオン時に最小化して起動します (管理者権限は不要)"),
+                    ui::toggle("autostart", autostart_on, cx, |this, on, cx| {
+                        match crate::autostart::set_enabled(on) {
+                            Ok(()) => this.toast(
+                                if on {
+                                    "自動起動を有効にしました"
+                                } else {
+                                    "自動起動を無効にしました"
+                                }
+                                .to_string(),
+                                false,
+                                cx,
+                            ),
+                            Err(e) => this.toast(e, true, cx),
+                        }
+                        cx.notify();
+                    }),
+                ))
+                .child(ui::row(
+                    "閉じても常駐",
+                    Some("× で終了せず最小化します (アプリ連動プロファイル・電池監視を続ける)"),
+                    ui::toggle(
+                        "keep-running",
+                        self.prefs.keep_running,
+                        cx,
+                        |this, on, cx| {
+                            this.prefs.keep_running = on;
+                            this.prefs.save();
+                            crate::autostart::set_keep_running(on);
+                            cx.notify();
+                        },
+                    ),
+                )),
+        );
+
         let about = ui::card_titled("このアプリについて", "info", None).child(
             ui::body()
                 .pb(px(14.))
@@ -287,6 +328,7 @@ impl Shell {
                         look.into_any_element(),
                         backend.into_any_element(),
                         fw.into_any_element(),
+                        resident.into_any_element(),
                         about.into_any_element(),
                     ])),
             )

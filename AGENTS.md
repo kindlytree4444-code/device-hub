@@ -19,6 +19,7 @@ docs/AUDIO_FRONTEND.md  USB DAC (TP55 / WalkPlay) の EQ 画面と契約の使�
 docs/BACKEND_BRIEF.md   Web HUB 完全移植の機能表 (v3)
 docs/ADD_DEVICE.md      新デバイス追加の手順 (別セッション/別エージェント向け)
 docs/PROTOCOL_NOTES.md  Web configurator の解析結果 (コマンド表・アドレス・機能一覧)
+docs/LOGITECH_HIDPP.md  Logicool G (PRO Wireless) HID++ 2.0 解析・G HUB 置き換え・常駐・G HUB 削除
 docs/FRONTEND.md        フロントエンドの構造
 ```
 
@@ -63,6 +64,8 @@ cargo run --release -p device-hub        # 普段使いは release (起動・描
 DEVHUB_DEMO=1 cargo run -p device-hub    # 常にデモ
 DEVHUB_FAST=1 cargo run -p device-hub    # GPU ガラス無効
 cargo run -p devhub-hid --example enum   # HID 列挙
+cargo run -p devhub-hid --example logiprobe            # Logicool HID++ 解析 (feature/プロファイル dump)
+cargo run -p devhub-hid --example logiprobe -- sniff   # HID++ 通信モニタ
 cargo run -p devhub-obs --example preview # OBS 無しでオーバーレイ描画を PNG 確認
 cargo clippy --workspace
 ```

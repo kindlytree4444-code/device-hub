@@ -72,6 +72,8 @@ pub enum DriverKind {
     Atk,
     /// www.lamzu.net / Aurora 系 (64B feature report、if2 FFFF:00)。
     Lamzu,
+    /// Logicool / Logitech G (HID++ 2.0、オンボードプロファイル 0x8100)。G HUB の置き換え。
+    Logitech,
     /// 未割り当て (検出だけできる)。
     Unsupported,
 }

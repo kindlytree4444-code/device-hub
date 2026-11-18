@@ -7,6 +7,9 @@
 //! 環境変数:
 //!   DEVHUB_DEMO=1  常にデモデバイス
 //!   DEVHUB_FAST=1  GPU ガラスを切る (フォールバック確認)
+//!
+//! 引数:
+//!   --background   最小化して起動 (Windows ログオン時の自動起動用。autostart.rs)
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -17,18 +20,25 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use device_hub::app::{clear_component_chrome, Shell};
+use device_hub::autostart;
 use device_hub::{prefs::Prefs, theme};
 use gpui_kit::component::{Theme, ThemeMode, TitleBar};
 use gpui_kit::*;
 
 fn main() {
+    // 2 個目の起動は既存ウィンドウを前面に出して終わる (HID の取り合いを防ぐ)。
+    if autostart::already_running() {
+        return;
+    }
+    let background = autostart::started_in_background();
     device_hub::rawinput::start(); // 実測ポーリングレート計測 (Raw Input)
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
-        .run(|cx| {
+        .run(move |cx| {
             gpui_kit::init(cx);
             // フォント登録は選択の後 — 使う書体だけ載せて常駐メモリを削る。
             let prefs = Prefs::load();
+            autostart::set_keep_running(prefs.keep_running);
             theme::set_font_id(&prefs.font);
             theme::install_fonts(cx);
             let light = prefs.light();
@@ -59,8 +69,22 @@ fn main() {
                 tb.title = Some("Device HUB".into());
             }
 
-            gpui_kit::open_window(options, cx, |window, cx| {
-                cx.new(|cx| Shell::new(window, cx))
+            options.focus = !background;
+            gpui_kit::open_window(options, cx, move |window, cx| {
+                // 常駐: × は最小化 (設定で OFF にすると従来どおり終了)。
+                window.on_window_should_close(cx, |window, _cx| {
+                    if autostart::keep_running() {
+                        window.minimize_window();
+                        false
+                    } else {
+                        true
+                    }
+                });
+                let shell = cx.new(|cx| Shell::new(window, cx));
+                if background {
+                    window.minimize_window();
+                }
+                shell
             })
             .expect("failed to open window");
             cx.on_window_closed(|cx, _| {

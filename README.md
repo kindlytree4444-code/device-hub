@@ -20,6 +20,11 @@ with a Liquid Glass design.
   rapid-trigger / release points, deadzones, lighting, advanced keys
   (DKS/MPT/MT/TGL/SOCD/RS), macros, live travel-depth display, calibration.
 - **USB DAC** — parametric EQ editing.
+- **Logitech G (HID++ 2.0)** — replaces G HUB for the PRO Wireless: DPI stages,
+  polling rate, button remapping, LED, onboard profiles, battery. Settings are
+  written to the mouse's onboard memory. Runs resident (autostart + close to
+  background); `scripts/remove-ghub.ps1` uninstalls G HUB (see
+  `docs/LOGITECH_HIDPP.md`).
 - **Process automation** — apply saved profiles when a specific app becomes
   foreground, with automatic restore on leave (multi-device profiles supported).
 - **OBS overlay plugin** (`devhub_obs.dll`) — live key/button press-depth source
@@ -35,6 +40,7 @@ with a Liquid Glass design.
 | HTS Plus Pro (wired + 2.4GHz dongle) | All settings incl. Rapid Trigger |
 | SU66 Max (Keebforce/Everglide) | Keymap, per-key perf, lighting, macros, live travel |
 | TP55 USB DAC | Parametric EQ |
+| Logitech PRO Wireless (c088 wired / c539 LIGHTSPEED) | HID++ 2.0 onboard profiles — **not yet verified on hardware** |
 
 Other models using the same protocols (mouse.fit report-8/EEPROM, xsyd) are
 detected automatically by capability, not by device name.
@@ -127,13 +133,17 @@ UI は GPUI + Liquid Glass デザイン。
 - **磁気キーボード** — オンボードレイヤー付きキーマップ・キーごとの AP/RT/リセット・
   デッドゾーン・ライティング・高度キー (DKS/MPT/MT/TGL/SOCD/RS)・マクロ・押下深さライブ表示
 - **USB DAC** — パラメトリック EQ
+- **Logicool G (HID++ 2.0)** — PRO Wireless 用の G HUB 置き換え。DPI・ポーリング・ボタン・LED・
+  オンボードプロファイル・電池。設定はマウス本体に保存。常駐 (自動起動・閉じても常駐) と
+  G HUB 削除スクリプト付き (`docs/LOGITECH_HIDPP.md`)
 - **プロセス連動** — 指定アプリが前面になったらプロファイルを適用、離れたら復帰 (複数デバイス対応)
 - **OBS プラグイン** — 押下深さのライブソース。アプリ無しで単体動作し、設定は OBS プロパティで完結
 - 設定・プロファイルのインポート/エクスポート、元に戻す、プリセット、コマンドパレット
 
 ### 動作確認デバイス
 
-HTS Plus Pro (有線+ドングル) · SU66 Max · TP55 USB DAC
+HTS Plus Pro (有線+ドングル) · SU66 Max · TP55 USB DAC ·
+Logicool PRO Wireless (HID++ 2.0 — 実機未検証)
 (同プロトコルの他機種も caps ベースで自動検出)
 
 ### ビルド
